@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
 // Reconciler reconciles a RedisCluster object
@@ -50,6 +51,7 @@ type Reconciler struct {
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	instance := &redisv1beta2.RedisCluster{}
+	logger.Info("------------ Strating reconcile rediscluster--------------")
 
 	err := r.Client.Get(context.TODO(), req.NamespacedName, instance)
 	if err != nil {
@@ -74,6 +76,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err = k8sutils.AddFinalizer(ctx, instance, k8sutils.RedisClusterFinalizer, r.Client); err != nil {
 		return intctrlutil.RequeueWithError(ctx, err, "failed to add finalizer")
 	}
+	logger.Info("------------Added Finalizer--------------")
 
 	// Check if the cluster is downscaled
 	if leaderCount := r.GetStatefulSetReplicas(ctx, instance.Namespace, instance.Name+"-leader"); leaderReplicas < leaderCount {
@@ -107,12 +110,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			// Step 3 Rebalance the cluster
 			k8sutils.RebalanceRedisCluster(ctx, r.K8sClient, instance)
 			logger.Info("Redis cluster is downscaled... Rebalancing the cluster is done")
-			return intctrlutil.RequeueAfter(ctx, time.Second*10, "")
+			return intctrlutil.RequeueAfter(ctx, time.Second*30, "------------- RequeueAfter 30 seconds")
 		} else {
 			logger.Info("masterCount is not equal to leader statefulset replicas,skip downscale", "masterCount", masterCount, "leaderReplicas", leaderReplicas)
 		}
 	}
 
+	logger.Info("------------Adding initializing status--------------")
 	// Mark the cluster status as initializing if there are no leader or follower nodes
 	if (instance.Status.ReadyLeaderReplicas == 0 && instance.Status.ReadyFollowerReplicas == 0) ||
 		instance.Status.ReadyLeaderReplicas != leaderReplicas {
@@ -121,6 +125,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return intctrlutil.RequeueWithError(ctx, err, "")
 		}
 	}
+	logger.Info("------------Added initializing status--------------")
 
 	if leaderReplicas != 0 {
 		err = k8sutils.CreateRedisLeaderService(ctx, instance, r.K8sClient)
@@ -128,14 +133,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return intctrlutil.RequeueWithError(ctx, err, "")
 		}
 	}
+	logger.Info("------------Created leader service--------------")
 	err = k8sutils.CreateRedisLeader(ctx, instance, r.K8sClient)
 	if err != nil {
 		return intctrlutil.RequeueWithError(ctx, err, "")
 	}
+	logger.Info("------------Created leader sts--------------")
 	err = k8sutils.ReconcileRedisPodDisruptionBudget(ctx, instance, "leader", instance.Spec.RedisLeader.PodDisruptionBudget, r.K8sClient)
 	if err != nil {
 		return intctrlutil.RequeueWithError(ctx, err, "")
 	}
+	logger.Info("------------Created leader pdb--------------")
 
 	if r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-leader") {
 		// Mark the cluster status as initializing if there are no follower nodes
@@ -259,7 +267,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			}
 		}
 	}
-	return intctrlutil.RequeueAfter(ctx, time.Second*10, "")
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -268,5 +276,6 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options)
 		For(&redisv1beta2.RedisCluster{}).
 		WithOptions(opts).
 		Owns(&appsv1.StatefulSet{}).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
