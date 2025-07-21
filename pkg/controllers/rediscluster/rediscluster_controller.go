@@ -172,7 +172,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if !(r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-leader") && r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-follower")) {
-		return intctrlutil.Reconciled()
+		return intctrlutil.RequeueAfter(ctx, time.Second*30, "sts is not ready, retrying after 30 seconds")
 	}
 
 	// Mark the cluster status as bootstrapping if all the leader and follower nodes are ready
