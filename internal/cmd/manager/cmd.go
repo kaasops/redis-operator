@@ -39,7 +39,9 @@ import (
 	coreWebhook "github.com/OT-CONTAINER-KIT/redis-operator/internal/webhook"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/time/rate"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -232,10 +234,16 @@ func setupControllers(mgr ctrl.Manager, k8sClient kubernetes.Interface, maxConcu
 
 	healer := redis.NewHealer(k8sClient)
 
+	// Use custom rate limiter for large clusters
+	controllerOpts := controller.Options{
+		MaxConcurrentReconciles: maxConcurrentReconciles,
+		RateLimiter:             newCustomRateLimiter(),
+	}
+
 	if err := (&rediscontroller.Reconciler{
 		Client:    mgr.GetClient(),
 		K8sClient: k8sClient,
-	}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}); err != nil {
+	}).SetupWithManager(mgr, controllerOpts); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Redis")
 		return err
 	}
@@ -246,7 +254,7 @@ func setupControllers(mgr ctrl.Manager, k8sClient kubernetes.Interface, maxConcu
 		Checker:     redis.NewChecker(k8sClient),
 		Recorder:    mgr.GetEventRecorderFor("rediscluster-controller"),
 		StatefulSet: k8sutils.NewStatefulSetService(k8sClient),
-	}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}); err != nil {
+	}).SetupWithManager(mgr, controllerOpts); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "RedisCluster")
 		return err
 	}
@@ -255,7 +263,7 @@ func setupControllers(mgr ctrl.Manager, k8sClient kubernetes.Interface, maxConcu
 		K8sClient:   k8sClient,
 		Healer:      healer,
 		StatefulSet: k8sutils.NewStatefulSetService(k8sClient),
-	}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}); err != nil {
+	}).SetupWithManager(mgr, controllerOpts); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "RedisReplication")
 		return err
 	}
@@ -265,7 +273,7 @@ func setupControllers(mgr ctrl.Manager, k8sClient kubernetes.Interface, maxConcu
 		Healer:             healer,
 		K8sClient:          k8sClient,
 		ReplicationWatcher: intctrlutil.NewResourceWatcher(),
-	}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}); err != nil {
+	}).SetupWithManager(mgr, controllerOpts); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "RedisSentinel")
 		return err
 	}
@@ -313,4 +321,12 @@ func setupHealthChecks(mgr ctrl.Manager) error {
 	}
 
 	return nil
+}
+
+// newCustomRateLimiter creates a rate limiter with max backoff of 30s instead of default 1000s.
+func newCustomRateLimiter() workqueue.RateLimiter {
+	return workqueue.NewMaxOfRateLimiter(
+		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 30*time.Second),
+		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(100), 200)},
+	)
 }
