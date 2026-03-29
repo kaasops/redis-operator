@@ -16,6 +16,7 @@ import (
 	"github.com/OT-CONTAINER-KIT/redis-operator/internal/k8sutils"
 	"github.com/OT-CONTAINER-KIT/redis-operator/internal/monitoring"
 	"github.com/OT-CONTAINER-KIT/redis-operator/internal/service/redis"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -74,7 +75,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 	}
 
-	return intctrlutil.RequeueAfter(ctx, time.Second*30, "")
+	return intctrlutil.RequeueAfter(ctx, time.Minute*5, "periodic reconcile")
 }
 
 func (r *Reconciler) UpdateRedisReplicationMaster(ctx context.Context, instance *rrvb2.RedisReplication, masterNode string) error {
@@ -450,6 +451,7 @@ func (r *Reconciler) updateStatus(ctx context.Context, rr *rrvb2.RedisReplicatio
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rrvb2.RedisReplication{}).
+		Owns(&appsv1.StatefulSet{}).
 		WithOptions(opts).
 		Complete(r)
 }

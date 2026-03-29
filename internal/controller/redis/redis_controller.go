@@ -24,6 +24,7 @@ import (
 	"github.com/OT-CONTAINER-KIT/redis-operator/internal/controller/common"
 	intctrlutil "github.com/OT-CONTAINER-KIT/redis-operator/internal/controllerutil"
 	"github.com/OT-CONTAINER-KIT/redis-operator/internal/k8sutils"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,13 +68,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		return intctrlutil.RequeueE(ctx, err, "failed to create service")
 	}
-	return intctrlutil.RequeueAfter(ctx, time.Second*10, "requeue after 10 seconds")
+	return intctrlutil.RequeueAfter(ctx, time.Minute*5, "periodic reconcile")
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, opts controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rvb2.Redis{}).
+		Owns(&appsv1.StatefulSet{}).
 		WithOptions(opts).
 		Complete(r)
 }

@@ -85,7 +85,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Check if the cluster is downscaled
 	if leaderCount := r.GetStatefulSetReplicas(ctx, instance.Namespace, instance.Name+"-leader"); leaderReplicas < leaderCount {
 		if !r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-leader") || !r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-follower") {
-			return intctrlutil.Reconciled()
+			return intctrlutil.RequeueAfter(ctx, time.Second*30, "statefulset not ready during downscale")
 		}
 		if masterCount := k8sutils.CheckRedisNodeCount(ctx, r.K8sClient, instance, "leader"); masterCount == leaderCount {
 			r.Recorder.Event(instance, corev1.EventTypeNormal, events.EventReasonRedisClusterDownscale, "Redis cluster is downscaling...")
@@ -139,7 +139,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			k8sutils.RebalanceRedisCluster(ctx, r.K8sClient, instance)
 			logger.Info("Redis cluster is downscaled... Rebalancing the cluster is done")
 			monitoring.RedisClusterRebalanceTotal.WithLabelValues(instance.Namespace, instance.Name).Inc()
-			return intctrlutil.RequeueAfter(ctx, time.Second*10, "")
+			return intctrlutil.RequeueAfter(ctx, time.Second*30, "requeue after cluster rebalance")
 		} else {
 			logger.Info("masterCount is not equal to leader statefulset replicas,skip downscale", "masterCount", masterCount, "leaderReplicas", leaderReplicas)
 		}
@@ -213,7 +213,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if !r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-leader") || !r.IsStatefulSetReady(ctx, instance.Namespace, instance.Name+"-follower") {
-		return intctrlutil.Reconciled()
+		return intctrlutil.RequeueAfter(ctx, time.Second*30, "statefulset not ready")
 	}
 
 	// Mark the cluster status as bootstrapping if all the leader and follower nodes are ready
@@ -381,7 +381,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		}
 	}
 
-	return intctrlutil.RequeueAfter(ctx, time.Second*10, "")
+	return intctrlutil.RequeueAfter(ctx, time.Minute*5, "periodic reconcile")
 }
 
 func (r *Reconciler) updateStatus(ctx context.Context, rc *rcvb2.RedisCluster, status rcvb2.RedisClusterStatus) (requeue bool, err error) {
